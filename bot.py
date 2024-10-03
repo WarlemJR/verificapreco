@@ -91,5 +91,6 @@ if __name__ == '__main__':
     thread = Thread(target=schedule_price_check)
     thread.start()
 
+    # Inicie o servidor Flask
     PORT = int(os.environ.get('PORT', 5000))
-    application.run_polling()
+    app.run(host='0.0.0.0', port=PORT)
