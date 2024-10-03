@@ -1,10 +1,12 @@
 import os
 import requests
 import time
+import schedule
 from flask import Flask, request
-from bs4 import BeautifulSoup  # Para web scraping
+from bs4 import BeautifulSoup
 from telegram import Bot, Update
-from telegram.ext import CommandHandler, Updater
+from telegram.ext import CommandHandler, ApplicationBuilder
+from threading import Thread
 
 app = Flask(__name__)
 
@@ -20,13 +22,33 @@ def check_price(url):
     headers = {"User-Agent": "Mozilla/5.0"}
     response = requests.get(url, headers=headers)
     soup = BeautifulSoup(response.text, 'html.parser')
-    
-    # Exemplo para Amazon (alterar de acordo com o site)
+
     price_tag = soup.find(id='priceblock_ourprice')
     if price_tag:
         price = price_tag.get_text()
         return price
     return None
+
+# Função para verificar todos os preços
+def check_all_prices():
+    messages = []
+    for url, last_price in monitored_links.items():
+        current_price = check_price(url)
+        if current_price != last_price:
+            monitored_links[url] = current_price
+            messages.append(f'Preço atualizado no link {url}: {current_price}')
+        else:
+            messages.append(f'Sem mudanças no link {url}.')
+
+    for message in messages:
+        bot.send_message(chat_id='1704610309', text=message)
+
+# Agendamento para verificar os preços a cada 30 minutos
+def schedule_price_check():
+    schedule.every(30).minutes.do(check_all_prices)
+    while True:
+        schedule.run_pending()
+        time.sleep(1)
 
 # Comando para adicionar um link
 def add_link(update: Update, context):
@@ -37,7 +59,7 @@ def add_link(update: Update, context):
     else:
         update.message.reply_text('Por favor, envie um link válido.')
 
-# Comando para checar preços
+# Comando para checar preços manualmente
 def check_prices(update: Update, context):
     messages = []
     for url, last_price in monitored_links.items():
@@ -47,24 +69,27 @@ def check_prices(update: Update, context):
             messages.append(f'Preço atualizado no link {url}: {current_price}')
         else:
             messages.append(f'Sem mudanças no link {url}.')
-    
+
     update.message.reply_text('\n'.join(messages))
 
-# Configuração do Updater e Dispatcher
-updater = Updater(token=TOKEN, use_context=True)
-dispatcher = updater.dispatcher
+# Configuração do Application
+application = ApplicationBuilder().token(TOKEN).build()
 
 # Comandos do bot
-dispatcher.add_handler(CommandHandler("add", add_link))
-dispatcher.add_handler(CommandHandler("check", check_prices))
+application.add_handler(CommandHandler("add", add_link))
+application.add_handler(CommandHandler("check", check_prices))
 
 # Iniciar o bot
 @app.route(f'/{TOKEN}', methods=['POST'])
 def webhook():
     update = Update.de_json(request.get_json(force=True), bot)
-    dispatcher.process_update(update)
+    application.process_update(update)
     return "ok"
 
 if __name__ == '__main__':
+    # Inicie a thread de agendamento
+    thread = Thread(target=schedule_price_check)
+    thread.start()
+
     PORT = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=PORT)
+    application.run_polling()
